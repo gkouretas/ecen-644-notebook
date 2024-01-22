@@ -68,9 +68,11 @@ def unpack(name: str) -> UnpackedCIFARData:
             
         if isinstance(v, bytes):
             v = v.decode() # decode bytes
-        elif isinstance(v, Iterable) and isinstance(v[0], bytes):
-            _dtype = type(v)
-            v = _dtype([_v.decode() for _v in v]) # iterate through elements and decode data. 
+        elif isinstance(v, list):
+            # NOTE: only works on 1D list, which is all that we are expecting w/ given datasets
+            for ii, element in enumerate(v):
+                if isinstance(element, bytes):
+                    v[ii] = element.decode()
         
         decoded_data[key] = v
                 
