@@ -28,6 +28,10 @@ class UnpackedCIFARData(TypedDict):
     data: np.ndarray
     filenames: list[str]
 
+def get_image_size() -> tuple[int, int, int]: return _IMAGE_SHAPE
+def get_image_width() -> int: return get_image_size()[0]
+def get_image_height() -> int: return get_image_size()[1]
+
 def get_metadata() -> dict:
     """Returns metadata of CIFAR datasets. Will return global `_META_DATA` variable once initialized
 
