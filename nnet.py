@@ -188,6 +188,7 @@ class NeuralNet:
         # Initialize delta to None
         delta = None
 
+        # Loop backwards
         for idx in reversed(range(len(self._weights))):
             # First iteration
             if delta is None:
@@ -201,10 +202,10 @@ class NeuralNet:
                 layer = self._network[idx + 1]
                 previous_layer = self._network[idx]
 
-                # Compute delta weight vector, which is done by multiplying the error by the partial derivative of the layer
+                # Compute delta, which is done by multiplying the error by the partial derivative of the layer
                 delta = err * self._activation_func.derivative(layer)
 
-                # Compute the change in weights and biases
+                # Re-compute weights/biases
                 w -= rate * np.dot(delta, previous_layer.T)
                 b -= rate * delta
             else:
@@ -219,12 +220,15 @@ class NeuralNet:
                 layer = self._network[idx + 1]
                 previous_layer = self._network[idx]
 
-                # Compute delta vector
+                # Iteratively compute delta for the next layer
                 delta = np.dot(w_ahead.T, delta) * self._activation_func.derivative(layer)
+
+                # Re-compute weights/biases
                 w -= rate * np.dot(delta, previous_layer.T)
                 b -= rate * delta
 
-    def _resize(self, x, size):
+    def _resize(self, x, size) -> np.ndarray:
+        """Resize matrix to match expected size. Also will recast to a numpy array to ensure efficacy"""
         if np.shape(x) != size:
             try:
                 return np.array(x).reshape(size)
