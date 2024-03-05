@@ -8,13 +8,11 @@ class LossFunction:
     @abc.abstractmethod
     def derivative(actual: np.ndarray, predicted: np.ndarray): pass
 
-class BinaryXEntropyLoss(LossFunction):
+class MSE(LossFunction):
     @staticmethod
     def compute(actual: np.ndarray, predicted: np.ndarray):
-        return -np.average(
-            actual*np.log(predicted) + (1.0-actual)*np.log(1 - predicted)
-        )
+        return np.sum(np.power(predicted - actual, 2))
 
     @staticmethod
     def derivative(actual: np.ndarray, predicted: np.ndarray):
-        return 1/np.size(actual, axis = 0) * ((1.0-actual)/(1.0-predicted) - predicted/actual) 
+        return 2 * (predicted - actual) / np.size(actual)

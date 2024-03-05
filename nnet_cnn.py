@@ -1,14 +1,20 @@
+"""
+George Kouretas -- ECEN 644
+CNN from scratch. Includes CNN architecture w/ configurable conv2D, maxPool2D, flatten, and dense layers
+"""
 from activation_funcs import ActivationFunction
 from loss_funcs import LossFunction
 
 import copy
 import numpy as np
 from typing import Iterable
-from scipy.signal import convolve2d, correlate2d
+from scipy.signal import convolve2d as conv2
+from scipy.signal import correlate2d as xcorr2
 
 import abc
 from dataclasses import dataclass
 
+"""Dataclass to contain information concerning the input shape, used for readability"""
 @dataclass(frozen = True)
 class InputShape:
     depth: int
@@ -18,6 +24,7 @@ class InputShape:
     @property
     def shape(self): return (self.depth, self.height, self.width)
 
+"""Abstract class for a layer, with required methods for forward/backward propogation"""
 class _Layer(abc.ABC):
     def __init__(self): pass
 
@@ -29,18 +36,19 @@ class _Layer(abc.ABC):
     def _backward_prop(self, input_: np.ndarray, gradient_: np.ndarray, rate: int) -> np.ndarray: 
         pass
 
+"""Conv2D layer"""
 class Conv2D(_Layer):
-    def __init__(self, input_depth: int, input_height: int, input_width: int, depth: int, kernel_size: int) -> None:
+    def __init__(self, input_depth: int, input_height: int, input_width: int, output_depth: int, kernel_size: int) -> None:
         super().__init__()
         self._input_shape = \
             InputShape(input_depth, input_height, input_width)
         
-        self._depth = depth
+        self._output_depth = output_depth
         self._kernel_size = kernel_size
 
         self._kernels = \
             np.random.randn(
-                self._depth, 
+                self._output_depth, 
                 self._input_shape.depth, 
                 self._kernel_size, 
                 self._kernel_size
@@ -48,7 +56,7 @@ class Conv2D(_Layer):
 
         self._biases = \
             np.random.randn(
-                self._depth, 
+                self._output_depth, 
                 self._input_shape.height - self._kernel_size + 1, 
                 self._input_shape.width - self._kernel_size + 1
             )
@@ -57,9 +65,12 @@ class Conv2D(_Layer):
             np.zeros(self._biases.shape)
 
     def _forward_prop(self, input_: np.ndarray):
-        for d in range(self._depth):
-            for k in self._kernels[d]:
-                self._output[d] = self._biases[d] + correlate2d(input_[d], k, "valid")
+        # Iterate across output depth (kernels)
+        for d in range(self._output_depth):
+            for d_in in range(self._input_shape.depth):
+                # output = sum(b + xcorr2d(input, kernel)). 
+                # Computes "valid" shape, which corresponds to the configured shape (H-K+1, W-K+1).
+                self._output[d] += self._biases[d] + xcorr2(input_[d_in], self._kernels[d, d_in], "valid")
 
         return self._output
 
@@ -69,10 +80,10 @@ class Conv2D(_Layer):
 
         self._biases -= rate * gradient_
         
-        for d in range(self._depth):
+        for d in range(self._output_depth):
             for d_in in range(self._input_shape.depth):
-                _kernel_grad = correlate2d(input_[d_in], gradient_[d], "valid")
-                _input_grad[d_in] += convolve2d(gradient_[d], self._kernels[d, d_in], "full")
+                _input_grad[d_in] += conv2(gradient_[d], self._kernels[d, d_in], "full")
+                _kernel_grad = xcorr2(input_[d_in], gradient_[d], "valid")
                 self._kernels[d, d_in] -= rate * _kernel_grad
 
         return _input_grad
@@ -94,10 +105,9 @@ class MaxPool2D(_Layer):
                     self._output[d, h, w] = \
                         np.max(input_[d, (2*h):(2*(h+1)), (2*w):(2*(w+1))], axis = (0,1))
                     
-        return self._output
+        return copy.deepcopy(self._output)
 
     def _backward_prop(self, input_: np.ndarray, gradient_: np.ndarray, _):
-        print(gradient_.shape)
         _input_grad = np.zeros(input_.shape)
         
         for h_ in range(self._input_shape.height//2):
@@ -124,8 +134,8 @@ class Flatten(_Layer):
 class Dense(_Layer):
     def __init__(self, input_shape: int, output_shape: int) -> None:
         super().__init__()
-        self._weight: np.ndarray = np.random.randn(output_shape, input_shape)
-        self._bias: np.ndarray = np.random.randn(output_shape, 1)
+        self._weight: np.ndarray    = np.random.randn(output_shape, input_shape)
+        self._bias: np.ndarray      = np.random.randn(output_shape, 1)
 
     def _forward_prop(self, input_: np.ndarray) -> np.ndarray:
         return np.dot(self._weight, input_) + self._bias
@@ -136,57 +146,48 @@ class Dense(_Layer):
         self._bias -= rate * gradient_
         return new_gradient
 
+CNNLayer = _Layer | ActivationFunction # CNN layer may be a layer or activation function
+
 class CNN:
-    def __init__(self, layers: Iterable[_Layer | ActivationFunction], loss: LossFunction) -> None:
+    def __init__(self, layers: Iterable[CNNLayer], loss: LossFunction) -> None:
         self._layers = layers   # NN layers
         self._loss = loss       # Loss function
+        self._errors = []
 
     def train(self, input_, output_, epochs: int, rate: float):
+        self._errors.clear()
         for epoch in range(epochs):
             _error = []
             for i, o in zip(input_, output_):
                 # Store inputs to later use for back prop.
                 _inputs = []
 
+                # print("######## Forward prop ########")
                 for layer in self._layers:
-                    print(f"In: {i.shape}")
-                    _inputs.append(i)
+                    _inputs.append(copy.deepcopy(i))
                     if isinstance(layer, _Layer):
                         i = layer._forward_prop(i)
                     elif isinstance(layer, ActivationFunction): 
                         i = layer.compute(i)
-                    print(f"Out: {i.shape}")
 
-                _error.append(self._loss.compute(actual = o, predicted = i))
-                grad_error = self._loss.derivative(actual = o, predicted = i)
+                o = np.reshape(o, (np.size(o), 1))
 
+                # Compute loss for forward iteration
+                _error.append(self._loss.compute(o, i))
+
+                # Compute gradient of loss
+                grad_error = self._loss.derivative(o, i)
+
+                # Nackwards propogation
                 for layer in reversed(self._layers):
+                    # Pop input from input list, which will yield the elements in reverse
+                    prev_input = _inputs.pop()
+
+                    # Perform gradient descent for layer/activation function
                     if isinstance(layer, _Layer):
-                        grad_error = layer._backward_prop(_inputs.pop(), grad_error, rate)
+                        grad_error = layer._backward_prop(prev_input, grad_error, rate)
                     elif isinstance(layer, ActivationFunction): 
-                        grad_error *= layer.derivative(_inputs.pop())
+                        grad_error = np.multiply(grad_error, layer.derivative(prev_input))
 
-            print(f"Epoch: {epoch+1}/{epochs}. Error = {np.average(_error)}")
-
-if __name__ == "__main__":
-    from activation_funcs import Sigmoid
-    from loss_funcs import BinaryXEntropyLoss
-    c2 = CNN(
-        [
-            Conv2D(50, 25, 25, 3, 3),       # Conv2D layer
-            Sigmoid(),                      # Activation layer
-            MaxPool2D(3, 23, 23),           # MaxPool2D layer
-            Sigmoid(),                      # Activation layer
-            Flatten(),                      # Flatten
-            Dense(3 * (23//2) * (23//2), 10),      # Dense layer
-            Sigmoid()                       # Activation layer
-        ],
-        loss = BinaryXEntropyLoss()
-    )
-    # # c2 = Conv2D(50, 25, 25, 3, 3)
-    # # c2._forward_prop(np.array(np.zeros((50, 25, 25))))
-    # c2 = MaxPool2D(50, 25, 25)
-    # c2._forward_prop(np.array(np.random.randn(50, 25, 25)))
-    # print(c2._output.shape)
-
-    c2.train(np.random.randn(100, 50, 25, 25), np.random.randn(10,1), epochs = 20, rate = 0.01)
+            self._errors.append(np.average(_error))
+            print(f"Epoch: {epoch+1}/{epochs}. Error = {self._errors[-1]}")
