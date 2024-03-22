@@ -97,6 +97,8 @@ def load_endovis_videos(dataset: DatasetType, training_single_instruments_only: 
                     cap_left = None
                     cap_right = None
                 else:
+                    if training_single_instruments_only and dataset == DatasetType.TRAINING and "Dataset1" in vid:
+                        continue # HACK: dataset 1 has multiple instruments, so skip source vid 
                     cap = cv.VideoCapture(vid)
                     container.extend(process_video(cap))
 
